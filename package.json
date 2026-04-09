@@ -1,0 +1,19 @@
+{
+  "name": "hashinal-forge",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "^2.51.0",
+    "@hashgraph/hedera-wallet-connect": "^2.0.0",
+    "@hashgraphonline/hashinal-wc": "^2.0.64",
+    "@hashgraphonline/standards-sdk": "^0.1.177"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
