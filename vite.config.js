@@ -1,33 +1,34 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from "vite";
 
 export default defineConfig({
-  // Needed because @hashgraph/sdk uses Node built-ins
+  server: {
+    allowedHosts: ["n84jjd-5173.csb.app", ".csb.app"],
+  },
   define: {
-    global: 'globalThis',
-    'process.env': {},
+    global: "globalThis",
+    "process.env": {},
   },
   resolve: {
     alias: {
-      // Some Hedera deps reference 'stream' / 'buffer' — polyfill them
-      stream: 'stream-browserify',
-      buffer: 'buffer',
+      stream: "stream-browserify",
+      buffer: "buffer",
     },
   },
   optimizeDeps: {
     include: [
-      '@hashgraphonline/hashinal-wc',
-      '@hashgraphonline/standards-sdk',
-      '@hashgraph/sdk',
-      '@hashgraph/hedera-wallet-connect',
+      "@hashgraphonline/hashinal-wc",
+      "@hashgraphonline/standards-sdk",
+      "@hashgraph/sdk",
+      "@hashgraph/hedera-wallet-connect",
     ],
     esbuildOptions: {
-      target: 'es2020',
+      target: "es2020",
     },
   },
   build: {
-    target: 'es2020',
+    target: "es2020",
     commonjsOptions: {
       transformMixedEsModules: true,
     },
   },
-})
+});
