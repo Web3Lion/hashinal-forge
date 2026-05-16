@@ -43,7 +43,8 @@ function chunkBuffer(buf, chunkBytes = 800) {
 async function createTopic(memo) {
   const sdk = getSdk()
   const topicId = await sdk.createTopic(memo)
-  return topicId
+  // Ensure we always return a plain string regardless of what the SDK returns
+  return topicId.toString()
 }
 
 /**
@@ -51,7 +52,7 @@ async function createTopic(memo) {
  */
 async function submitChunk(topicId, message) {
   const sdk = getSdk()
-  await sdk.submitMessageToTopic(topicId, message)
+  await sdk.submitMessageToTopic(topicId.toString(), message)
 }
 
 /**
@@ -69,7 +70,7 @@ export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
   const topicId = await createTopic(`HCS-1 inscription: ${fileName}`)
   onProgress(10, `Topic created: ${topicId}`)
 
-  // 2. Send HCS-3 header message so indexers know this is an inscription
+  // 2. Send HCS-1 header message so indexers know this is an inscription
   const header = JSON.stringify({
     p: 'hcs-1',
     op: 'register',
@@ -111,7 +112,13 @@ export async function inscribeJSON(obj, onProgress) {
   onProgress(30, `Metadata topic created: ${topicId}`)
 
   // Header
-  await submitChunk(topicId, JSON.stringify({ p: 'hcs-1', op: 'register', t_id: topicId, m: 'metadata.json', type: 'application/json' }))
+  await submitChunk(topicId, JSON.stringify({
+    p: 'hcs-1',
+    op: 'register',
+    t_id: topicId,
+    m: 'metadata.json',
+    type: 'application/json',
+  }))
   onProgress(50, 'Sent metadata header — approve in wallet')
 
   // Metadata as base64
@@ -137,16 +144,12 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
   const accountId = getAccountId()
   if (!sdk) throw new Error('Wallet not connected')
 
-  // HashinalsWalletConnectSDK.createToken creates fungible tokens —
-  // for NFTs we use executeTransaction with the raw SDK objects.
-  // We import @hashgraph/sdk at runtime for the transaction builders.
   const {
     TokenCreateTransaction,
     TokenType,
     TokenSupplyType,
   } = await import('@hashgraph/sdk')
 
-  // Build the transaction — the wallet signs it
   const tx = new TokenCreateTransaction()
     .setTokenName(name)
     .setTokenSymbol(symbol)
@@ -156,10 +159,7 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
     .setMaxSupply(maxSupply || 0)
     .setSupplyType(supplyType === 'INFINITE' ? TokenSupplyType.Infinite : TokenSupplyType.Finite)
     .setTreasuryAccountId(accountId)
-  // Supply key = treasury account key (the connected wallet)
-  // WalletConnect will sign with the connected account key automatically
 
-  // Use the sdk's executeTransaction helper which routes through WalletConnect
   const receipt = await sdk.executeTransaction(tx)
   return receipt.tokenId.toString()
 }
@@ -179,7 +179,7 @@ export async function mintNFT(tokenId, metadataHRL, count = 1) {
   )
 
   const tx = new TokenMintTransaction()
-    .setTokenId(tokenId)
+    .setTokenId(tokenId.toString())
     .setMetadata(metadataBuffers)
 
   const receipt = await sdk.executeTransaction(tx)
