@@ -1,17 +1,9 @@
 /**
  * hedera.js — Real Hedera transactions via WalletConnect + standards-sdk
- *
- * Flow:
- *   1. Inscribe image  → imageTopicId  → imageHRL
- *   2. Build metadata JSON referencing imageHRL
- *   3. Inscribe metadata JSON → metaTopicId → metadataHRL
- *   4. (optional) Create HTS NFT token collection
- *   5. Mint NFT with metadataHRL as on-chain metadata bytes
  */
 
 import { getSdk, getAccountId, getNetwork } from './wallet.js'
 
-// Mirror node base URLs
 const MIRROR = {
   testnet: 'https://testnet.mirrornode.hedera.com/api/v1',
   mainnet: 'https://mainnet.mirrornode.hedera.com/api/v1',
@@ -21,10 +13,6 @@ function mirror() {
   return MIRROR[getNetwork()] || MIRROR.testnet
 }
 
-/**
- * Chunk a Uint8Array into base64 strings of at most `chunkBytes` bytes each.
- * HCS messages are limited to ~1KB of base64 safely; we use 800 bytes.
- */
 function chunkBuffer(buf, chunkBytes = 800) {
   const chunks = []
   let offset = 0
@@ -37,27 +25,43 @@ function chunkBuffer(buf, chunkBytes = 800) {
 }
 
 /**
- * Create a new HCS-1 topic (no keys — public topic).
- * Returns topicId string e.g. "0.0.123456"
+ * Create a new HCS-1 topic using TopicCreateTransaction.
+ * Returns topicId as a plain string e.g. "0.0.123456"
  */
 async function createTopic(memo) {
   const sdk = getSdk()
-  const topicId = await sdk.createTopic(memo)
-  // Ensure we always return a plain string regardless of what the SDK returns
-  return topicId.toString()
+  if (!sdk) throw new Error('Wallet not connected — call connectWallet() first')
+
+  const { TopicCreateTransaction } = await import('@hashgraph/sdk')
+
+  const tx = new TopicCreateTransaction()
+  if (memo) tx.setTopicMemo(memo)
+
+  const receipt = await sdk.executeTransaction(tx)
+
+  if (!receipt?.topicId) {
+    throw new Error(`createTopic failed — receipt had no topicId. Receipt: ${JSON.stringify(receipt)}`)
+  }
+
+  return receipt.topicId.toString()
 }
 
 /**
- * Submit a single chunk to a topic.
+ * Submit a single text message to an HCS-1 topic.
  */
 async function submitChunk(topicId, message) {
   const sdk = getSdk()
-  await sdk.submitMessageToTopic(topicId.toString(), message)
+  const { TopicMessageSubmitTransaction } = await import('@hashgraph/sdk')
+
+  const tx = new TopicMessageSubmitTransaction()
+    .setTopicId(topicId)
+    .setMessage(message)
+
+  return sdk.executeTransaction(tx)
 }
 
 /**
- * Inscribe a file (Uint8Array) to HCS-1.
- * Creates a topic, sends all chunks as separate messages.
+ * Inscribe a file to HCS-1.
  * Returns: { topicId, hrl, chunkCount }
  */
 export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
@@ -66,11 +70,10 @@ export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
 
   onProgress(0, `Creating HCS-1 topic for ${fileName}...`)
 
-  // 1. Create topic
   const topicId = await createTopic(`HCS-1 inscription: ${fileName}`)
   onProgress(10, `Topic created: ${topicId}`)
 
-  // 2. Send HCS-1 header message so indexers know this is an inscription
+  // Header
   const header = JSON.stringify({
     p: 'hcs-1',
     op: 'register',
@@ -79,19 +82,19 @@ export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
     type: mimeType,
   })
   await submitChunk(topicId, header)
-  onProgress(15, 'Sent inscription header')
+  onProgress(15, 'Sent inscription header — approve in wallet')
 
-  // 3. Chunk the file and send
+  // Chunks
   const chunks = chunkBuffer(new Uint8Array(fileBuffer))
   for (let i = 0; i < chunks.length; i++) {
     const pct = Math.round(15 + ((i + 1) / chunks.length) * 70)
-    onProgress(pct, `Sending chunk ${i + 1}/${chunks.length} — approve in wallet`)
+    onProgress(pct, `Chunk ${i + 1}/${chunks.length} — approve in wallet`)
     await submitChunk(topicId, chunks[i])
   }
 
-  // 4. Send end sentinel
+  // End sentinel
   await submitChunk(topicId, JSON.stringify({ p: 'hcs-1', op: 'end', t_id: topicId }))
-  onProgress(90, 'Inscription complete')
+  onProgress(90, 'Image inscription complete')
 
   const hrl = `hcs://1/${topicId}`
   return { topicId, hrl, chunkCount: chunks.length }
@@ -105,13 +108,11 @@ export async function inscribeJSON(obj, onProgress) {
   const sdk = getSdk()
   if (!sdk) throw new Error('Wallet not connected')
 
-  const json = JSON.stringify(obj)
   onProgress(0, 'Creating HCS-1 topic for metadata JSON...')
 
   const topicId = await createTopic('HCS-1 inscription: metadata.json')
   onProgress(30, `Metadata topic created: ${topicId}`)
 
-  // Header
   await submitChunk(topicId, JSON.stringify({
     p: 'hcs-1',
     op: 'register',
@@ -121,12 +122,10 @@ export async function inscribeJSON(obj, onProgress) {
   }))
   onProgress(50, 'Sent metadata header — approve in wallet')
 
-  // Metadata as base64
-  const encoded = btoa(unescape(encodeURIComponent(json)))
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
   await submitChunk(topicId, encoded)
-  onProgress(80, 'Metadata inscribed')
+  onProgress(80, 'Metadata content sent')
 
-  // End sentinel
   await submitChunk(topicId, JSON.stringify({ p: 'hcs-1', op: 'end', t_id: topicId }))
   onProgress(95, 'Metadata inscription complete')
 
@@ -136,7 +135,6 @@ export async function inscribeJSON(obj, onProgress) {
 
 /**
  * Create a new HTS NonFungibleUnique token.
- * The connected wallet account becomes the supply key holder.
  * Returns tokenId string.
  */
 export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
@@ -161,12 +159,17 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
     .setTreasuryAccountId(accountId)
 
   const receipt = await sdk.executeTransaction(tx)
+
+  if (!receipt?.tokenId) {
+    throw new Error(`createNFTToken failed — no tokenId in receipt: ${JSON.stringify(receipt)}`)
+  }
+
   return receipt.tokenId.toString()
 }
 
 /**
- * Mint one or more NFT serials with the given metadata HRL.
- * Returns array of serial numbers.
+ * Mint NFT serials with the given metadata HRL.
+ * Returns array of serial number strings.
  */
 export async function mintNFT(tokenId, metadataHRL, count = 1) {
   const sdk = getSdk()
@@ -179,41 +182,37 @@ export async function mintNFT(tokenId, metadataHRL, count = 1) {
   )
 
   const tx = new TokenMintTransaction()
-    .setTokenId(tokenId.toString())
+    .setTokenId(tokenId)
     .setMetadata(metadataBuffers)
 
   const receipt = await sdk.executeTransaction(tx)
+
+  if (!receipt?.serials) {
+    throw new Error(`mintNFT failed — no serials in receipt: ${JSON.stringify(receipt)}`)
+  }
+
   return receipt.serials.map(s => s.toString())
 }
 
 /**
  * Fetch NFT info from Hedera Mirror Node.
- * Returns { metadata (decoded), tokenInfo }
  */
 export async function fetchNFTFromMirror(tokenId, serial) {
   const base = mirror()
 
-  // Get the NFT serial info
   const nftRes = await fetch(`${base}/tokens/${tokenId}/nfts/${serial}`)
-  if (!nftRes.ok) throw new Error(`NFT not found: ${tokenId}/${serial}`)
+  if (!nftRes.ok) throw new Error(`NFT not found: ${tokenId}/${serial} (HTTP ${nftRes.status})`)
   const nftData = await nftRes.json()
 
-  // Decode metadata bytes → HRL string
   const metadataRaw = nftData.metadata
   let metadataHRL = ''
   if (metadataRaw) {
-    try {
-      metadataHRL = atob(metadataRaw)
-    } catch {
-      metadataHRL = metadataRaw
-    }
+    try { metadataHRL = atob(metadataRaw) } catch { metadataHRL = metadataRaw }
   }
 
-  // Get token info
   const tokenRes = await fetch(`${base}/tokens/${tokenId}`)
   const tokenData = tokenRes.ok ? await tokenRes.json() : {}
 
-  // Resolve the metadata JSON from the HRL if it's an hcs:// reference
   let metaJson = null
   if (metadataHRL.startsWith('hcs://')) {
     const topicId = metadataHRL.split('/')[2]
@@ -221,10 +220,7 @@ export async function fetchNFTFromMirror(tokenId, serial) {
   }
 
   return {
-    tokenId,
-    serial,
-    metadataHRL,
-    metaJson,
+    tokenId, serial, metadataHRL, metaJson,
     tokenName: tokenData.name,
     tokenSymbol: tokenData.symbol,
     createdTimestamp: nftData.created_timestamp,
@@ -234,8 +230,6 @@ export async function fetchNFTFromMirror(tokenId, serial) {
 
 /**
  * Fetch and reassemble content from an HCS-1 topic via Mirror Node.
- * Skips header/end control messages, reassembles base64 content chunks.
- * Returns parsed JSON if valid, otherwise raw string.
  */
 export async function fetchHCSContent(topicId) {
   const base = mirror()
@@ -249,26 +243,15 @@ export async function fetchHCSContent(topicId) {
   for (const msg of messages) {
     try {
       const decoded = atob(msg.message)
-      // Skip JSON control messages (header / end sentinel)
       const parsed = JSON.parse(decoded)
       if (parsed.op === 'register' || parsed.op === 'end') continue
-      // If it's valid JSON that's not a control message, return it
       return parsed
     } catch {
-      // Not JSON — it's a base64 data chunk
-      try {
-        assembled += atob(msg.message)
-      } catch {
-        // raw string chunk
-        assembled += msg.message
-      }
+      try { assembled += atob(msg.message) }
+      catch { assembled += msg.message }
     }
   }
 
-  // Try to parse assembled content as JSON (metadata)
-  try {
-    return JSON.parse(assembled)
-  } catch {
-    return assembled
-  }
+  try { return JSON.parse(assembled) }
+  catch { return assembled }
 }
