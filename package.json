@@ -7,12 +7,14 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "@hashgraph/sdk": "^2.51.0",
-    "@hashgraph/hedera-wallet-connect": "^2.0.0",
-    "@hashgraphonline/hashinal-wc": "^2.0.64",
-    "@hashgraphonline/standards-sdk": "^0.1.177"
-  },
+"dependencies": {
+  "@hashgraph/sdk": "2.81.0",
+  "@hashgraph/hedera-wallet-connect": "^2.0.0",
+  "@hashgraphonline/hashinal-wc": "^2.0.64",
+  "@hashgraphonline/standards-sdk": "^0.1.177",
+  "buffer": "^6.0.3",
+  "stream-browserify": "^3.0.0"
+}
   "devDependencies": {
     "vite": "^5.4.0"
   }
