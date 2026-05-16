@@ -17,12 +17,10 @@ export async function initWallet(projectId, net = 'testnet') {
   network = net
 
   const { HashinalsWalletConnectSDK } = await import('@hashgraphonline/hashinal-wc')
-  const { LedgerId } = await import('@hashgraph/sdk')
 
   sdk = HashinalsWalletConnectSDK.getInstance()
 
-  const ledgerId = net === 'mainnet' ? LedgerId.MAINNET : LedgerId.TESTNET
-
+  // Pass network as a plain string — NOT a LedgerId object
   await sdk.init(
     projectId,
     {
@@ -31,7 +29,7 @@ export async function initWallet(projectId, net = 'testnet') {
       url: window.location.href,
       icons: ['https://hol.org/Logo_Icon.webp'],
     },
-    ledgerId
+    net  // <-- plain string: 'testnet' or 'mainnet'
   )
 
   return sdk
@@ -48,12 +46,27 @@ export async function connectWallet(projectId, net, onStatusChange) {
     if (!session) throw new Error('Connection cancelled or timed out')
 
     onStatusChange('Fetching account info...')
-    const info = await sdk.getAccountInfo()
-    accountId = info.accountId
+
+    // getAccountInfo may return an object or just an accountId string depending on version
+    let resolvedAccountId
+    try {
+      const info = await sdk.getAccountInfo()
+      resolvedAccountId = info?.accountId
+        ? info.accountId.toString()
+        : info.toString()
+    } catch {
+      // Fallback: pull from the session accounts list
+      const accounts = session?.namespaces?.hedera?.accounts || []
+      const raw = accounts[0] || ''
+      // Format is "hedera:testnet:0.0.12345" — take the last segment
+      resolvedAccountId = raw.split(':').pop()
+    }
+
+    accountId = resolvedAccountId
     connected = true
 
     onStatusChange(`Connected: ${accountId}`)
-    return { accountId, network: info.network }
+    return { accountId, network: net }
   } catch (err) {
     connected = false
     accountId = null
@@ -62,7 +75,9 @@ export async function connectWallet(projectId, net, onStatusChange) {
 }
 
 export async function disconnectWallet() {
-  if (sdk) await sdk.disconnect()
+  if (sdk) {
+    try { await sdk.disconnect() } catch { /* ignore */ }
+  }
   connected = false
   accountId = null
   sdk = null
@@ -70,5 +85,9 @@ export async function disconnectWallet() {
 
 export async function getBalance() {
   if (!sdk || !connected) return null
-  return sdk.getAccountBalance()
+  try {
+    return await sdk.getAccountBalance()
+  } catch {
+    return null
+  }
 }
