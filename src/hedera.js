@@ -1,12 +1,10 @@
 /**
  * hedera.js — Real Hedera transactions via WalletConnect
  *
- * Key features:
- * - Shared collection topic architecture (one topic per collection)
- * - Batch pre-signing: all HCS chunk transactions signed in ONE wallet session
- *   then broadcast via plain Client — no wallet needed for broadcast
- * - Auto image resize to 128×128 via Canvas API
- * - Full token key support: supply, admin, freeze, pause, wipe, metadata
+ * Key fix in batchSignAndBroadcast:
+ * - Use signer._getHederaClient() for BOTH signing and broadcasting
+ * - This ensures the same nodes are used for signing and execution
+ * - Avoids INVALID_SIGNATURE from node account ID mismatch
  */
 
 import { getSdk, getAccountId, getNetwork } from './wallet.js'
@@ -20,7 +18,7 @@ function mirrorBase() { return MIRROR[getNetwork()] || MIRROR.testnet }
 
 const CHUNK_SIZE = 4096
 
-// ─── IMAGE RESIZE ────────────────────────────────────────────────────────────
+// ─── IMAGE RESIZE ─────────────────────────────────────────────────────────────
 
 export async function resizeImage(file, targetSize = 128) {
   return new Promise((resolve, reject) => {
@@ -49,7 +47,7 @@ export async function resizeImage(file, targetSize = 128) {
   })
 }
 
-// ─── CHUNKING ────────────────────────────────────────────────────────────────
+// ─── CHUNKING ─────────────────────────────────────────────────────────────────
 
 function chunkBuffer(buf) {
   const chunks = []
@@ -66,7 +64,7 @@ function generateInscriptionId(prefix = 'ins') {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-// ─── SIGNER ──────────────────────────────────────────────────────────────────
+// ─── SIGNER ───────────────────────────────────────────────────────────────────
 
 function getSigner() {
   const sdk = getSdk()
@@ -81,8 +79,7 @@ function getSigner() {
 }
 
 /**
- * Execute a single transaction through WalletConnect.
- * One wallet approval per call.
+ * Execute a single transaction through WalletConnect (one wallet approval).
  */
 async function execTx(tx) {
   const signer = getSigner()
@@ -99,24 +96,31 @@ async function execTx(tx) {
 }
 
 /**
- * BATCH SIGN AND BROADCAST:
- * 1. Populate all transactions (set transaction IDs)
- * 2. Sign each via signTransaction — HashPack batches these into one session
- * 3. Execute via plain Client — no wallet needed since already signed
- * 4. Fetch receipts via plain Client
+ * BATCH SIGN AND BROADCAST
  *
- * This reduces N HCS messages from N wallet approvals to effectively
- * one signing session, then silent broadcast.
+ * Critical fix: use the signer's own internal Hedera client (_getHederaClient)
+ * for BOTH signing and executing. This ensures the node account IDs selected
+ * during freezeWith/signTransaction are the same nodes used during execute(),
+ * avoiding INVALID_SIGNATURE from node mismatches.
+ *
+ * Flow:
+ * 1. Get signer's internal client (has correct network + node list)
+ * 2. Populate transaction IDs via signer.populateTransaction
+ * 3. signTransaction freezes with the signer's client → picks nodes
+ * 4. execute(signerClient) → broadcasts to SAME nodes → signature valid ✓
  */
 async function batchSignAndBroadcast(transactions, onProgress, baseLabel) {
   const signer = getSigner()
-  const { AccountId, Client } = await import('@hashgraph/sdk')
+  const { AccountId } = await import('@hashgraph/sdk')
   const accountIdStr = signer.getAccountId().toString()
-  const client = getNetwork() === 'mainnet' ? Client.forMainnet() : Client.forTestnet()
+
+  // Use the signer's own internal Hedera client for consistent node selection
+  // This is the same client used internally by signTransaction()
+  const signerClient = signer._getHederaClient()
 
   onProgress(0, `Preparing ${transactions.length} transactions...`)
 
-  // Step 1: Populate all transactions (sets TransactionId)
+  // Step 1: Set autoRenewAccountId and populate transaction IDs
   for (const tx of transactions) {
     if (typeof tx.setAutoRenewAccountId === 'function') {
       tx.setAutoRenewAccountId(AccountId.fromString(accountIdStr))
@@ -126,7 +130,9 @@ async function batchSignAndBroadcast(transactions, onProgress, baseLabel) {
 
   onProgress(10, `Sign all ${transactions.length} — approve in wallet...`)
 
-  // Step 2: Sign all via wallet (signTransaction freezes + signs via HashPack)
+  // Step 2: Sign each transaction
+  // signer.signTransaction internally calls freezeWith(signerClient) which
+  // assigns specific node account IDs from that client's network
   const signed = []
   for (let i = 0; i < transactions.length; i++) {
     const signedTx = await signer.signTransaction(transactions[i])
@@ -137,12 +143,13 @@ async function batchSignAndBroadcast(transactions, onProgress, baseLabel) {
 
   onProgress(75, `Broadcasting ${signed.length} transactions...`)
 
-  // Step 3: Execute via plain client — transaction is already signed,
-  // no wallet interaction needed for broadcast
+  // Step 3: Execute via THE SAME signer client
+  // The signed transaction has node IDs locked to nodes in signerClient's network.
+  // Using signerClient guarantees execute() sends to those same nodes.
   const receipts = []
   for (let i = 0; i < signed.length; i++) {
-    const response = await signed[i].execute(client)
-    const receipt = await response.getReceipt(client)
+    const response = await signed[i].execute(signerClient)
+    const receipt = await response.getReceipt(signerClient)
     receipts.push(receipt)
     const pct = Math.round(75 + ((i + 1) / signed.length) * 22)
     onProgress(pct, `Confirmed ${i + 1}/${signed.length}`)
@@ -152,7 +159,7 @@ async function batchSignAndBroadcast(transactions, onProgress, baseLabel) {
   return receipts
 }
 
-// ─── TOPIC ───────────────────────────────────────────────────────────────────
+// ─── TOPIC ────────────────────────────────────────────────────────────────────
 
 export async function createCollectionTopic(collectionName) {
   const { TopicCreateTransaction } = await import('@hashgraph/sdk')
@@ -162,17 +169,15 @@ export async function createCollectionTopic(collectionName) {
   return receipt.topicId.toString()
 }
 
-// ─── INSCRIPTION ─────────────────────────────────────────────────────────────
+// ─── INSCRIPTION ──────────────────────────────────────────────────────────────
 
 export async function inscribeFileToTopic(topicId, fileBuffer, mimeType, fileName, onProgress) {
   const { TopicMessageSubmitTransaction } = await import('@hashgraph/sdk')
   const inscriptionId = generateInscriptionId('img')
 
-  onProgress(0, `Preparing image inscription...`)
+  onProgress(0, 'Preparing image inscription...')
 
   const chunks = chunkBuffer(new Uint8Array(fileBuffer))
-
-  // Build all transactions upfront
   const txs = []
 
   // Header
@@ -206,9 +211,7 @@ export async function inscribeFileToTopic(topicId, fileBuffer, mimeType, fileNam
   )
 
   onProgress(5, `${txs.length} transactions ready — approve in wallet...`)
-
   await batchSignAndBroadcast(txs, onProgress, 'image chunk')
-
   onProgress(100, 'Image inscribed ✓')
 
   const hrl = `hcs://1/${topicId}?inscription_id=${inscriptionId}`
@@ -245,7 +248,7 @@ export async function inscribeMetadataToTopic(topicId, metadataObj, onProgress) 
   return { inscriptionId, hrl }
 }
 
-// ─── KEY MANAGEMENT ──────────────────────────────────────────────────────────
+// ─── KEY MANAGEMENT ───────────────────────────────────────────────────────────
 
 export async function generateKeyPair() {
   const { PrivateKey } = await import('@hashgraph/sdk')
@@ -266,7 +269,7 @@ export function downloadKeyFile(keyData, role, filename) {
     'PRIVATE_KEY=' + keyData.privateKey,
     'PUBLIC_KEY=' + keyData.publicKey,
     '',
-    '# To use in Node.js:',
+    `# Node.js usage:`,
     `# const ${role}Key = PrivateKey.fromString(process.env.${role.toUpperCase()}_PRIVATE_KEY)`,
   ].join('\n')
 
@@ -279,7 +282,7 @@ export function downloadKeyFile(keyData, role, filename) {
   URL.revokeObjectURL(url)
 }
 
-// ─── TOKEN CREATION ──────────────────────────────────────────────────────────
+// ─── TOKEN CREATION ───────────────────────────────────────────────────────────
 
 export async function createNFTCollection({ name, symbol, maxSupply, supplyType, collectionTopicId, keys = {} }) {
   const sdk = getSdk()
@@ -297,11 +300,12 @@ export async function createNFTCollection({ name, symbol, maxSupply, supplyType,
   let walletPublicKey = null
   try { walletPublicKey = signer.getAccountKey?.() } catch { /* ignore */ }
 
-  const supplyKey   = keys.supplyKey   ? await resolveKey(keys.supplyKey)   : walletPublicKey
+  const supplyKey   = keys.supplyKey   ? await resolveKey(keys.supplyKey)   : (keys.enableSupply   !== false ? walletPublicKey : null)
   const adminKey    = keys.adminKey    ? await resolveKey(keys.adminKey)    : (keys.enableAdmin    ? walletPublicKey : null)
   const freezeKey   = keys.freezeKey   ? await resolveKey(keys.freezeKey)   : (keys.enableFreeze   ? walletPublicKey : null)
   const pauseKey    = keys.pauseKey    ? await resolveKey(keys.pauseKey)    : (keys.enablePause    ? walletPublicKey : null)
   const wipeKey     = keys.wipeKey     ? await resolveKey(keys.wipeKey)     : (keys.enableWipe     ? walletPublicKey : null)
+  const kycKey      = keys.kycKey      ? await resolveKey(keys.kycKey)      : (keys.enableKyc      ? walletPublicKey : null)
   const metadataKey = keys.metadataKey ? await resolveKey(keys.metadataKey) : (keys.enableMetadata ? walletPublicKey : null)
 
   let tx = new TokenCreateTransaction()
@@ -320,6 +324,7 @@ export async function createNFTCollection({ name, symbol, maxSupply, supplyType,
   if (freezeKey)   tx = tx.setFreezeKey(freezeKey)
   if (pauseKey)    tx = tx.setPauseKey(pauseKey)
   if (wipeKey)     tx = tx.setWipeKey(wipeKey)
+  if (kycKey)      tx = tx.setKycKey(kycKey)
   if (metadataKey && typeof tx.setMetadataKey === 'function') {
     tx = tx.setMetadataKey(metadataKey)
   }
@@ -345,7 +350,7 @@ export async function mintNFT(tokenId, metadataHRL, count = 1) {
   return receipt.serials.map(s => s.toString())
 }
 
-// ─── APPROVAL ESTIMATOR ──────────────────────────────────────────────────────
+// ─── APPROVAL ESTIMATOR ───────────────────────────────────────────────────────
 
 export function estimateApprovals({ fileSizeBytes, isNewTopic, isNewToken, mintCount = 1 }) {
   let approvals = 0
@@ -361,7 +366,7 @@ export function estimateChunks(fileSizeBytes) {
   return Math.ceil(fileSizeBytes / CHUNK_SIZE)
 }
 
-// ─── VIEWER ──────────────────────────────────────────────────────────────────
+// ─── VIEWER ───────────────────────────────────────────────────────────────────
 
 export async function fetchNFTFromMirror(tokenId, serial) {
   const base = mirrorBase()
