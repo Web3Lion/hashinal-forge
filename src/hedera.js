@@ -7,26 +7,26 @@
  * which internally calls freezeWith(this._getHederaClient()) — the correct path.
  */
 
-import { getSdk, getAccountId, getNetwork } from './wallet.js'
+import { getSdk, getAccountId, getNetwork } from "./wallet.js";
 
 const MIRROR = {
-  testnet: 'https://testnet.mirrornode.hedera.com/api/v1',
-  mainnet: 'https://mainnet.mirrornode.hedera.com/api/v1',
-}
+  testnet: "https://testnet.mirrornode.hedera.com/api/v1",
+  mainnet: "https://mainnet.mirrornode.hedera.com/api/v1",
+};
 
 function mirror() {
-  return MIRROR[getNetwork()] || MIRROR.testnet
+  return MIRROR[getNetwork()] || MIRROR.testnet;
 }
 
 function chunkBuffer(buf, chunkBytes = 800) {
-  const chunks = []
-  let offset = 0
+  const chunks = [];
+  let offset = 0;
   while (offset < buf.byteLength) {
-    const slice = buf.slice(offset, offset + chunkBytes)
-    chunks.push(btoa(String.fromCharCode(...new Uint8Array(slice))))
-    offset += chunkBytes
+    const slice = buf.slice(offset, offset + chunkBytes);
+    chunks.push(btoa(String.fromCharCode(...new Uint8Array(slice))));
+    offset += chunkBytes;
   }
-  return chunks
+  return chunks;
 }
 
 /**
@@ -34,22 +34,24 @@ function chunkBuffer(buf, chunkBytes = 800) {
  * Prefers the signer whose accountId matches the connected account.
  */
 function getSigner() {
-  const sdk = getSdk()
-  if (!sdk) throw new Error('Wallet not connected')
+  const sdk = getSdk();
+  if (!sdk) throw new Error("Wallet not connected");
 
-  const accountInfo = sdk.getAccountInfo?.()
-  const accountId = accountInfo?.accountId
+  const accountInfo = sdk.getAccountInfo?.();
+  const accountId = accountInfo?.accountId;
 
-  const signers = sdk.dAppConnector?.signers
-  if (!signers?.length) throw new Error('No signers available — reconnect your wallet')
+  const signers = sdk.dAppConnector?.signers;
+  if (!signers?.length)
+    throw new Error("No signers available — reconnect your wallet");
 
   // Prefer the signer that matches our connected account
   const signer = accountId
-    ? signers.find(s => s.getAccountId().toString() === accountId) ?? signers[0]
-    : signers[0]
+    ? signers.find((s) => s.getAccountId().toString() === accountId) ??
+      signers[0]
+    : signers[0];
 
-  if (!signer) throw new Error('No matching signer found')
-  return signer
+  if (!signer) throw new Error("No matching signer found");
+  return signer;
 }
 
 /**
@@ -58,52 +60,67 @@ function getSigner() {
  * bypassing the buggy freezeWithSigner() → setAutoRenewAccountId() path.
  */
 async function execTx(tx) {
-  const signer = getSigner()
+  const signer = getSigner();
+  const { AccountId } = await import("@hashgraph/sdk");
 
-  // populateTransaction sets the TransactionId (required before signing)
-  await signer.populateTransaction(tx)
+  // Set autoRenewAccountId explicitly before populateTransaction
+  if (typeof tx.setAutoRenewAccountId === "function") {
+    const accountIdStr = signer.getAccountId().toString();
+    tx.setAutoRenewAccountId(AccountId.fromString(accountIdStr));
+  }
 
-  // signTransaction freezes with the signer's internal Hedera client
-  // (which correctly handles node account IDs) then signs
-  const signedTx = await signer.signTransaction(tx)
+  // populateTransaction sets the TransactionId
+  await signer.populateTransaction(tx);
 
-  // executeWithSigner broadcasts the signed transaction
-  const response = await signedTx.executeWithSigner(signer)
+  // executeWithSigner handles freeze + sign + execute
+  const response = await tx.executeWithSigner(signer);
 
-  // getReceiptWithSigner waits for consensus
-  return response.getReceiptWithSigner(signer)
+  // getReceiptWithSigner fails in WalletConnect environments —
+  // use getReceipt with a plain client instead
+  const { Client } = await import("@hashgraph/sdk");
+  const client =
+    getNetwork() === "mainnet" ? Client.forMainnet() : Client.forTestnet();
+
+  return response.getReceipt(client);
 }
-
 /**
  * Create a new HCS-1 topic.
  * Returns topicId as a plain string e.g. "0.0.123456"
  */
 async function createTopic(memo) {
-  const { TopicCreateTransaction } = await import('@hashgraph/sdk')
+  const { TopicCreateTransaction, AccountId } = await import("@hashgraph/sdk");
+  const signer = getSigner();
+
+  // Get accountId as plain string and convert to AccountId object
+  const accountIdStr = signer.getAccountId().toString();
+  const accountId = AccountId.fromString(accountIdStr);
 
   const tx = new TopicCreateTransaction()
-  if (memo) tx.setTopicMemo(memo)
+    .setAutoRenewAccountId(accountId) // set explicitly so freezeWith skips auto-set
+    .setAutoRenewPeriod(7776000); // 90 days in seconds
 
-  const receipt = await execTx(tx)
+  if (memo) tx.setTopicMemo(memo);
+
+  const receipt = await execTx(tx);
 
   if (!receipt?.topicId) {
-    throw new Error(`createTopic failed — no topicId in receipt: ${JSON.stringify(receipt)}`)
+    throw new Error(`createTopic failed — no topicId in receipt`);
   }
 
-  return receipt.topicId.toString()
+  return receipt.topicId.toString();
 }
 
 /**
  * Submit a single message to an HCS-1 topic.
  */
 async function submitChunk(topicId, message) {
-  const { TopicMessageSubmitTransaction } = await import('@hashgraph/sdk')
+  const { TopicMessageSubmitTransaction } = await import("@hashgraph/sdk");
 
   const tx = new TopicMessageSubmitTransaction()
     .setTopicId(topicId)
-    .setMessage(message)
+    .setMessage(message);
 
-  return execTx(tx)
+  return execTx(tx);
 }
 
 /**
@@ -111,39 +128,42 @@ async function submitChunk(topicId, message) {
  * Returns: { topicId, hrl, chunkCount }
  */
 export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
-  const sdk = getSdk()
-  if (!sdk) throw new Error('Wallet not connected')
+  const sdk = getSdk();
+  if (!sdk) throw new Error("Wallet not connected");
 
-  onProgress(0, `Creating HCS-1 topic for ${fileName}...`)
+  onProgress(0, `Creating HCS-1 topic for ${fileName}...`);
 
-  const topicId = await createTopic(`HCS-1 inscription: ${fileName}`)
-  onProgress(10, `Topic created: ${topicId}`)
+  const topicId = await createTopic(`HCS-1 inscription: ${fileName}`);
+  onProgress(10, `Topic created: ${topicId}`);
 
   // Header
   const header = JSON.stringify({
-    p: 'hcs-1',
-    op: 'register',
+    p: "hcs-1",
+    op: "register",
     t_id: topicId,
     m: fileName,
     type: mimeType,
-  })
-  await submitChunk(topicId, header)
-  onProgress(15, 'Sent inscription header — approve in wallet')
+  });
+  await submitChunk(topicId, header);
+  onProgress(15, "Sent inscription header — approve in wallet");
 
   // Chunks
-  const chunks = chunkBuffer(new Uint8Array(fileBuffer))
+  const chunks = chunkBuffer(new Uint8Array(fileBuffer));
   for (let i = 0; i < chunks.length; i++) {
-    const pct = Math.round(15 + ((i + 1) / chunks.length) * 70)
-    onProgress(pct, `Chunk ${i + 1}/${chunks.length} — approve in wallet`)
-    await submitChunk(topicId, chunks[i])
+    const pct = Math.round(15 + ((i + 1) / chunks.length) * 70);
+    onProgress(pct, `Chunk ${i + 1}/${chunks.length} — approve in wallet`);
+    await submitChunk(topicId, chunks[i]);
   }
 
   // End sentinel
-  await submitChunk(topicId, JSON.stringify({ p: 'hcs-1', op: 'end', t_id: topicId }))
-  onProgress(90, 'Image inscription complete')
+  await submitChunk(
+    topicId,
+    JSON.stringify({ p: "hcs-1", op: "end", t_id: topicId })
+  );
+  onProgress(90, "Image inscription complete");
 
-  const hrl = `hcs://1/${topicId}`
-  return { topicId, hrl, chunkCount: chunks.length }
+  const hrl = `hcs://1/${topicId}`;
+  return { topicId, hrl, chunkCount: chunks.length };
 }
 
 /**
@@ -151,32 +171,38 @@ export async function inscribeFile(fileBuffer, mimeType, fileName, onProgress) {
  * Returns: { topicId, hrl }
  */
 export async function inscribeJSON(obj, onProgress) {
-  const sdk = getSdk()
-  if (!sdk) throw new Error('Wallet not connected')
+  const sdk = getSdk();
+  if (!sdk) throw new Error("Wallet not connected");
 
-  onProgress(0, 'Creating HCS-1 topic for metadata JSON...')
+  onProgress(0, "Creating HCS-1 topic for metadata JSON...");
 
-  const topicId = await createTopic('HCS-1 inscription: metadata.json')
-  onProgress(30, `Metadata topic created: ${topicId}`)
+  const topicId = await createTopic("HCS-1 inscription: metadata.json");
+  onProgress(30, `Metadata topic created: ${topicId}`);
 
-  await submitChunk(topicId, JSON.stringify({
-    p: 'hcs-1',
-    op: 'register',
-    t_id: topicId,
-    m: 'metadata.json',
-    type: 'application/json',
-  }))
-  onProgress(50, 'Sent metadata header — approve in wallet')
+  await submitChunk(
+    topicId,
+    JSON.stringify({
+      p: "hcs-1",
+      op: "register",
+      t_id: topicId,
+      m: "metadata.json",
+      type: "application/json",
+    })
+  );
+  onProgress(50, "Sent metadata header — approve in wallet");
 
-  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(obj))))
-  await submitChunk(topicId, encoded)
-  onProgress(80, 'Metadata content sent')
+  const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+  await submitChunk(topicId, encoded);
+  onProgress(80, "Metadata content sent");
 
-  await submitChunk(topicId, JSON.stringify({ p: 'hcs-1', op: 'end', t_id: topicId }))
-  onProgress(95, 'Metadata inscription complete')
+  await submitChunk(
+    topicId,
+    JSON.stringify({ p: "hcs-1", op: "end", t_id: topicId })
+  );
+  onProgress(95, "Metadata inscription complete");
 
-  const hrl = `hcs://1/${topicId}`
-  return { topicId, hrl }
+  const hrl = `hcs://1/${topicId}`;
+  return { topicId, hrl };
 }
 
 /**
@@ -184,15 +210,13 @@ export async function inscribeJSON(obj, onProgress) {
  * Returns tokenId string.
  */
 export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
-  const sdk = getSdk()
-  const accountId = getAccountId()
-  if (!sdk) throw new Error('Wallet not connected')
+  const sdk = getSdk();
+  const accountId = getAccountId();
+  if (!sdk) throw new Error("Wallet not connected");
 
-  const {
-    TokenCreateTransaction,
-    TokenType,
-    TokenSupplyType,
-  } = await import('@hashgraph/sdk')
+  const { TokenCreateTransaction, TokenType, TokenSupplyType } = await import(
+    "@hashgraph/sdk"
+  );
 
   const tx = new TokenCreateTransaction()
     .setTokenName(name)
@@ -201,16 +225,24 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
     .setDecimals(0)
     .setInitialSupply(0)
     .setMaxSupply(maxSupply || 0)
-    .setSupplyType(supplyType === 'INFINITE' ? TokenSupplyType.Infinite : TokenSupplyType.Finite)
-    .setTreasuryAccountId(accountId)
+    .setSupplyType(
+      supplyType === "INFINITE"
+        ? TokenSupplyType.Infinite
+        : TokenSupplyType.Finite
+    )
+    .setTreasuryAccountId(accountId);
 
-  const receipt = await execTx(tx)
+  const receipt = await execTx(tx);
 
   if (!receipt?.tokenId) {
-    throw new Error(`createNFTToken failed — no tokenId in receipt: ${JSON.stringify(receipt)}`)
+    throw new Error(
+      `createNFTToken failed — no tokenId in receipt: ${JSON.stringify(
+        receipt
+      )}`
+    );
   }
 
-  return receipt.tokenId.toString()
+  return receipt.tokenId.toString();
 }
 
 /**
@@ -218,86 +250,106 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
  * Returns array of serial number strings.
  */
 export async function mintNFT(tokenId, metadataHRL, count = 1) {
-  const sdk = getSdk()
-  if (!sdk) throw new Error('Wallet not connected')
+  const sdk = getSdk();
+  if (!sdk) throw new Error("Wallet not connected");
 
-  const { TokenMintTransaction } = await import('@hashgraph/sdk')
+  const { TokenMintTransaction } = await import("@hashgraph/sdk");
 
   const metadataBuffers = Array(count).fill(
     new TextEncoder().encode(metadataHRL)
-  )
+  );
 
   const tx = new TokenMintTransaction()
     .setTokenId(tokenId)
-    .setMetadata(metadataBuffers)
+    .setMetadata(metadataBuffers);
 
-  const receipt = await execTx(tx)
+  const receipt = await execTx(tx);
 
   if (!receipt?.serials) {
-    throw new Error(`mintNFT failed — no serials in receipt: ${JSON.stringify(receipt)}`)
+    throw new Error(
+      `mintNFT failed — no serials in receipt: ${JSON.stringify(receipt)}`
+    );
   }
 
-  return receipt.serials.map(s => s.toString())
+  return receipt.serials.map((s) => s.toString());
 }
 
 /**
  * Fetch NFT info from Hedera Mirror Node.
  */
 export async function fetchNFTFromMirror(tokenId, serial) {
-  const base = mirror()
+  const base = mirror();
 
-  const nftRes = await fetch(`${base}/tokens/${tokenId}/nfts/${serial}`)
-  if (!nftRes.ok) throw new Error(`NFT not found: ${tokenId}/${serial} (HTTP ${nftRes.status})`)
-  const nftData = await nftRes.json()
+  const nftRes = await fetch(`${base}/tokens/${tokenId}/nfts/${serial}`);
+  if (!nftRes.ok)
+    throw new Error(
+      `NFT not found: ${tokenId}/${serial} (HTTP ${nftRes.status})`
+    );
+  const nftData = await nftRes.json();
 
-  const metadataRaw = nftData.metadata
-  let metadataHRL = ''
+  const metadataRaw = nftData.metadata;
+  let metadataHRL = "";
   if (metadataRaw) {
-    try { metadataHRL = atob(metadataRaw) } catch { metadataHRL = metadataRaw }
+    try {
+      metadataHRL = atob(metadataRaw);
+    } catch {
+      metadataHRL = metadataRaw;
+    }
   }
 
-  const tokenRes = await fetch(`${base}/tokens/${tokenId}`)
-  const tokenData = tokenRes.ok ? await tokenRes.json() : {}
+  const tokenRes = await fetch(`${base}/tokens/${tokenId}`);
+  const tokenData = tokenRes.ok ? await tokenRes.json() : {};
 
-  let metaJson = null
-  if (metadataHRL.startsWith('hcs://')) {
-    const topicId = metadataHRL.split('/')[2]
-    metaJson = await fetchHCSContent(topicId)
+  let metaJson = null;
+  if (metadataHRL.startsWith("hcs://")) {
+    const topicId = metadataHRL.split("/")[2];
+    metaJson = await fetchHCSContent(topicId);
   }
 
   return {
-    tokenId, serial, metadataHRL, metaJson,
+    tokenId,
+    serial,
+    metadataHRL,
+    metaJson,
     tokenName: tokenData.name,
     tokenSymbol: tokenData.symbol,
     createdTimestamp: nftData.created_timestamp,
     accountId: nftData.account_id,
-  }
+  };
 }
 
 /**
  * Fetch and reassemble content from an HCS-1 topic via Mirror Node.
  */
 export async function fetchHCSContent(topicId) {
-  const base = mirror()
-  const res = await fetch(`${base}/topics/${topicId}/messages?limit=100&order=asc`)
-  if (!res.ok) throw new Error(`Topic not found: ${topicId}`)
-  const data = await res.json()
+  const base = mirror();
+  const res = await fetch(
+    `${base}/topics/${topicId}/messages?limit=100&order=asc`
+  );
+  if (!res.ok) throw new Error(`Topic not found: ${topicId}`);
+  const data = await res.json();
 
-  const messages = data.messages || []
-  let assembled = ''
+  const messages = data.messages || [];
+  let assembled = "";
 
   for (const msg of messages) {
     try {
-      const decoded = atob(msg.message)
-      const parsed = JSON.parse(decoded)
-      if (parsed.op === 'register' || parsed.op === 'end') continue
-      return parsed
+      const decoded = atob(msg.message);
+      const parsed = JSON.parse(decoded);
+      if (parsed.op === "register" || parsed.op === "end") continue;
+      return parsed;
     } catch {
-      try { assembled += atob(msg.message) }
-      catch { assembled += msg.message }
+      try {
+        assembled += atob(msg.message);
+      } catch {
+        assembled += msg.message;
+      }
     }
   }
 
-  try { return JSON.parse(assembled) }
-  catch { return assembled }
+  try {
+    return JSON.parse(assembled);
+  } catch {
+    return assembled;
+  }
 }
