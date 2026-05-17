@@ -15,7 +15,7 @@ export function renderApp() {
   </div>
   <div class="nav-right">
     <div class="net-pill" id="netPill">
-      <span class="dot" id="netDot"></span>
+      <span class="dot"></span>
       <span id="netLabel">TESTNET</span>
     </div>
     <button class="wallet-btn" id="walletBtn">
@@ -31,21 +31,21 @@ export function renderApp() {
 <div class="page active" id="page-mint">
   <div class="page-header">
     <div class="page-title">Mint a <span>Hashinal NFT</span></div>
-    <div class="page-subtitle">Shared collection topic architecture — one topic, many NFTs, minimal wallet approvals.</div>
+    <div class="page-subtitle">Shared collection topic · Auto image resize · Batch signing reduces wallet approvals</div>
   </div>
 
   <div id="walletGate" class="warn-box">
     <strong>🔌 Connect your wallet first.</strong> Click <strong>Connect Wallet</strong> top right. Your private key never touches this app.
   </div>
 
-  <div class="flow-steps" id="flowSteps">
+  <div class="flow-steps">
     <div class="flow-step active" data-step="1" id="fstep-1">
       <div class="flow-num">1</div>
       <div><div class="flow-label">Topic</div><div class="flow-sublabel">Collection topic</div></div>
     </div>
     <div class="flow-step" data-step="2" id="fstep-2">
       <div class="flow-num">2</div>
-      <div><div class="flow-label">Image</div><div class="flow-sublabel">128×128 recommended</div></div>
+      <div><div class="flow-label">Image</div><div class="flow-sublabel">Auto-resize 128×128</div></div>
     </div>
     <div class="flow-step" data-step="3" id="fstep-3">
       <div class="flow-num">3</div>
@@ -61,67 +61,68 @@ export function renderApp() {
     </div>
   </div>
 
-  <!-- STEP 1: COLLECTION TOPIC -->
+  <!-- STEP 1: TOPIC -->
   <div class="mint-panel active" id="mp-1">
     <div class="info-box">
       <strong>Step 1 — Collection Topic</strong><br>
-      Create one shared HCS-1 topic for your entire collection, or paste an existing Topic ID to add to an existing collection. All images and metadata are inscribed into this single topic, referenced by unique <code>inscription_id</code>s — minimizing wallet approvals and fees.
+      One shared HCS-1 topic per collection. Paste an existing Topic ID to add to that collection, or create a new one. Save the Topic ID — paste it here for every future mint.
     </div>
-
     <div class="card">
       <div class="card-header"><div class="card-dot"></div><div class="card-title">Collection Topic</div></div>
-
       <div class="form-group" style="margin-bottom:16px;">
-        <label>Existing Topic ID <span style="color:var(--text-muted);font-weight:400;">(leave blank to create new)</span></label>
-        <input type="text" id="m_topicId" placeholder="0.0.123456 — paste your collection topic ID here" />
+        <label>Existing Topic ID <span style="color:var(--text-muted);font-weight:400;text-transform:none;letter-spacing:0;">(leave blank to create new)</span></label>
+        <input type="text" id="m_topicId" placeholder="0.0.123456" />
       </div>
-
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
         <div style="flex:1;height:1px;background:var(--border);"></div>
-        <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">OR CREATE NEW</span>
+        <span style="font-size:11px;color:var(--text-muted);font-family:var(--mono);white-space:nowrap;">OR CREATE NEW</span>
         <div style="flex:1;height:1px;background:var(--border);"></div>
       </div>
-
       <div class="form-grid" style="margin-bottom:12px;">
         <div class="form-group">
-          <label>Collection Name (for topic memo)</label>
+          <label>Collection Name</label>
           <input type="text" id="m_collectionName2" placeholder="Genesis Hashinals" />
         </div>
         <div class="form-group" style="justify-content:flex-end;">
-          <label style="visibility:hidden;">Create</label>
+          <label style="visibility:hidden;">x</label>
           <button class="btn btn-ghost" id="createTopicBtn" style="height:44px;">+ Create New Topic</button>
         </div>
       </div>
-
       <div class="success-box" id="topicSuccess" style="display:none;"></div>
-
       <div class="warn-box" style="margin-bottom:0;">
-        <strong>💾 Save your Topic ID!</strong> Paste it back in Step 1 for every future mint in this collection. Without it you'll create a new topic each time.
+        <strong>💾 Save your Topic ID!</strong> It's shown again after minting. Paste it back here for every future mint in this collection.
       </div>
     </div>
-
-    <div class="actions">
-      <div></div>
-      <button class="btn btn-primary" id="step1Next">Next: Upload Image →</button>
-    </div>
+    <div class="actions"><div></div><button class="btn btn-primary" id="step1Next">Next: Upload Image →</button></div>
   </div>
 
   <!-- STEP 2: IMAGE -->
   <div class="mint-panel" id="mp-2">
     <div class="info-box">
       <strong>Step 2 — Upload Artwork</strong><br>
-      Recommended: <strong>128×128 PNG</strong> (~15KB) = ~2-4 wallet approvals for the image. Each 4KB chunk requires one approval. Larger files = more approvals.
+      Images auto-resize to <strong>128×128</strong> before inscription. With batch signing, all image chunks are signed in <strong>one HashPack session</strong> regardless of count.
     </div>
-
     <div class="card">
       <div class="card-header"><div class="card-dot"></div><div class="card-title">NFT Artwork</div></div>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;padding:12px 14px;background:var(--surface2);border-radius:9px;border:1px solid var(--border);">
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;">Auto-Resize Target</div>
+          <div style="font-size:12px;color:var(--text-dim);">Images resized before inscribing to reduce chunks and fees.</div>
+        </div>
+        <select id="resizeOption" style="width:160px;">
+          <option value="128">128×128 (default)</option>
+          <option value="256">256×256</option>
+          <option value="512">512×512</option>
+          <option value="0">Keep original</option>
+        </select>
+      </div>
       <div class="file-drop" id="imgDrop">
         <input type="file" id="imgInput" accept="image/png,image/jpeg,image/gif,image/svg+xml,image/webp" />
         <span class="drop-icon">🖼</span>
         <div class="drop-text">Drop artwork or click to browse</div>
-        <div class="drop-hint">Recommended: 128×128 PNG · Keep under 50KB · Fewer KB = fewer wallet approvals</div>
+        <div class="drop-hint">PNG · JPEG · GIF · SVG · Auto-resized before inscription</div>
       </div>
-      <div class="file-preview" id="imgPreview">
+      <div class="file-preview" id="imgPreview" style="display:none;">
         <img id="imgThumb" src="" alt="preview" />
         <div class="fp-info">
           <div class="fp-name" id="imgName"></div>
@@ -129,8 +130,18 @@ export function renderApp() {
         </div>
         <button class="fp-remove" id="imgClear">✕</button>
       </div>
+      <div id="resizedPreviewWrap" style="display:none;margin-top:12px;">
+        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--accent3);font-weight:700;margin-bottom:8px;">Resized Output (inscribed)</div>
+        <div style="display:flex;align-items:center;gap:14px;padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:9px;">
+          <img id="resizedThumb" src="" alt="resized" style="width:72px;height:72px;object-fit:contain;border:1px solid var(--border2);border-radius:6px;background:var(--bg);" />
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;" id="resizedName"></div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);" id="resizedMeta"></div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--accent3);margin-top:4px;" id="resizedChunks"></div>
+          </div>
+        </div>
+      </div>
     </div>
-
     <div class="actions">
       <button class="btn btn-secondary" data-goto="1">← Back</button>
       <button class="btn btn-primary" id="step2Next">Next: Build Metadata →</button>
@@ -139,11 +150,6 @@ export function renderApp() {
 
   <!-- STEP 3: METADATA -->
   <div class="mint-panel" id="mp-3">
-    <div class="info-box">
-      <strong>Step 3 — NFT Metadata</strong><br>
-      The <code>image</code> field will be automatically set to your image HRL after inscription. This JSON is also inscribed to the shared topic (3 approvals).
-    </div>
-
     <div class="card">
       <div class="card-header"><div class="card-dot"></div><div class="card-title">NFT Details (HIP-412)</div></div>
       <div class="form-grid">
@@ -161,18 +167,15 @@ export function renderApp() {
         </div>
       </div>
     </div>
-
     <div class="card">
       <div class="card-header"><div class="card-dot purple"></div><div class="card-title">Traits / Attributes</div></div>
       <div class="attr-list" id="attrList"></div>
       <button class="btn btn-ghost btn-sm" id="addAttrBtn">+ Add Trait</button>
     </div>
-
     <div class="card">
       <div class="card-header"><div class="card-dot green"></div><div class="card-title">Live JSON Preview</div></div>
       <div class="json-preview" id="metaPreview"></div>
     </div>
-
     <div class="actions">
       <button class="btn btn-secondary" data-goto="2">← Back</button>
       <button class="btn btn-primary" id="step3Next">Next: Token &amp; Keys →</button>
@@ -181,13 +184,13 @@ export function renderApp() {
 
   <!-- STEP 4: TOKEN & KEYS -->
   <div class="mint-panel" id="mp-4">
+
     <div class="card">
       <div class="card-header"><div class="card-dot"></div><div class="card-title">Token Mode</div></div>
       <div class="toggle-row" style="margin-bottom:16px;">
         <button class="toggle-opt active" id="tmode-new">Create New Token</button>
         <button class="toggle-opt" id="tmode-existing">Use Existing Token</button>
       </div>
-
       <div id="tfields-new">
         <div class="form-grid">
           <div class="form-group"><label>Token Name *</label><input id="m_tokenName" placeholder="Hashinals Collection" /></div>
@@ -198,73 +201,38 @@ export function renderApp() {
           </div>
         </div>
       </div>
-
       <div id="tfields-existing" style="display:none;">
         <div class="form-group">
           <label>Token ID *</label>
           <input id="m_existingToken" placeholder="0.0.123456" />
-          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;font-family:var(--mono);">Connected wallet must be the supply key holder.</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:5px;font-family:var(--mono);">Connected wallet must hold the supply key.</div>
         </div>
       </div>
     </div>
 
-    <!-- KEY OPTIONS -->
+    <!-- TOKEN KEY CAPABILITIES -->
     <div class="card">
-      <div class="card-header"><div class="card-dot purple"></div><div class="card-title">Token Keys</div></div>
+      <div class="card-header"><div class="card-dot purple"></div><div class="card-title">Token Key Capabilities</div></div>
 
-      <div style="display:flex;align-items:center;gap:12px;padding:12px;background:var(--surface2);border-radius:9px;margin-bottom:16px;">
-        <input type="checkbox" id="useWalletKeyAll" checked style="width:18px;height:18px;cursor:pointer;accent-color:var(--accent3);" />
-        <div>
-          <div style="font-size:14px;font-weight:700;color:var(--text);">Use wallet key for all roles</div>
-          <div style="font-size:12px;color:var(--text-dim);">Supply, Admin, Freeze, Pause keys all default to your connected wallet account key — nothing extra to remember.</div>
-        </div>
+      <div class="info-box" style="margin-bottom:16px;">
+        Select which capabilities to enable on the token. <strong>All checked roles use your connected wallet key by default</strong> — nothing extra to remember. Check "Use custom key" to generate and download a separate key for that role.
       </div>
 
-      <div id="advancedKeyOptions" style="display:none;">
-        <div class="info-box" style="margin-bottom:16px;">
-          Custom keys are generated in your browser and downloaded as a <code>.txt</code> file. Store them safely — they control your token. The wallet key is still used for signing transactions.
-        </div>
+      <!-- Key capability grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;" id="keyCapGrid">
 
-        <!-- SUPPLY KEY -->
-        <div style="margin-bottom:14px;padding:14px;background:var(--surface2);border-radius:9px;border:1px solid var(--border);">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-            <div style="font-size:13px;font-weight:700;color:var(--text);">Supply Key</div>
-            <div style="font-size:11px;color:var(--text-muted);">Controls minting new serials</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;" id="customrow_supply">
-            <input type="checkbox" id="custom_supply" style="accent-color:var(--accent2);" />
-            <label for="custom_supply" style="font-size:12px;color:var(--text-dim);cursor:pointer;text-transform:none;letter-spacing:0;">Use a separate generated key instead of wallet key</label>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;" id="genrow_supply" style="display:none;">
-            <button class="btn btn-ghost btn-sm" id="gen_supply">Generate Key</button>
-            <div id="key_display_supply" style="display:none;flex:1;"></div>
-          </div>
-        </div>
+        ${keyCapCard('supply',   'Supply Key',    'Required to mint new serials',          true,  false, '#3dd6f5')}
+        ${keyCapCard('admin',    'Admin Key',     'Update or delete the token',            true,  false, '#8b5cf6')}
+        ${keyCapCard('metadata', 'Metadata Key',  'Update NFT metadata (HIP-646)',         true,  false, '#10e6a0')}
+        ${keyCapCard('freeze',   'Freeze Key',    'Freeze accounts from transacting',      false, false, '#f59e0b')}
+        ${keyCapCard('pause',    'Pause Key',     'Pause all token transactions',          false, false, '#f59e0b')}
+        ${keyCapCard('kyc',      'KYC Key',       'Grant/revoke KYC on accounts',         false, false, '#f59e0b')}
+        ${keyCapCard('wipe',     'Wipe Key',      'Wipe tokens from accounts',            false, true,  '#ef4444')}
 
-        <!-- ADMIN KEY -->
-        ${keyRoleCard(
-          "admin",
-          "Admin Key",
-          "Allows updating or deleting the token"
-        )}
-        <!-- FREEZE KEY -->
-        ${keyRoleCard(
-          "freeze",
-          "Freeze Key",
-          "Allows freezing accounts from transacting"
-        )}
-        <!-- PAUSE KEY -->
-        ${keyRoleCard(
-          "pause",
-          "Pause Key",
-          "Allows pausing all token transactions"
-        )}
-        <!-- WIPE KEY -->
-        ${keyRoleCard(
-          "wipe",
-          "Wipe Key",
-          "Allows wiping tokens from accounts — use with caution"
-        )}
+      </div>
+
+      <div style="margin-top:14px;padding:12px 14px;background:rgba(61,214,245,0.05);border:1px solid rgba(61,214,245,0.15);border-radius:9px;font-size:12px;color:var(--text-dim);">
+        ⬡ <strong style="color:var(--text);">Tip:</strong> You can always add keys later if the token has an Admin Key. Without an Admin Key, the token configuration is permanent.
       </div>
     </div>
 
@@ -286,29 +254,32 @@ export function renderApp() {
 
   <!-- STEP 5: MINT -->
   <div class="mint-panel" id="mp-5">
-
-    <div class="card" id="summaryCard">
+    <div class="card">
       <div class="card-header"><div class="card-dot"></div><div class="card-title">Summary</div></div>
       <div id="summaryContent"></div>
     </div>
 
     <div class="card">
-      <div class="card-header"><div class="card-dot green"></div><div class="card-title">Cost &amp; Approvals Estimate</div></div>
+      <div class="card-header"><div class="card-dot green"></div><div class="card-title">Cost &amp; Wallet Approvals</div></div>
       <table class="cost-table">
         <thead><tr><th>Operation</th><th class="amt">Est. USD</th></tr></thead>
         <tbody>
-          <tr><td>Image inscription (HCS messages)</td><td class="amt" id="c-img">~$0.003</td></tr>
-          <tr><td>Metadata JSON inscription</td><td class="amt">~$0.0001</td></tr>
+          <tr><td>Image inscription (batch signed)</td><td class="amt" id="c-img">~$0.003</td></tr>
+          <tr><td>Metadata JSON inscription (batch)</td><td class="amt">~$0.0001</td></tr>
           <tr><td id="c-token-lbl">Token creation (HTS)</td><td class="amt" id="c-token">~$1.00</td></tr>
           <tr><td>NFT mint × <span id="c-cnt">1</span></td><td class="amt" id="c-mint">~$0.05</td></tr>
           <tr><td><strong>Estimated Total</strong></td><td class="amt" id="c-total"><strong>~$1.06</strong></td></tr>
-          <tr><td><strong>Wallet Approvals</strong></td><td class="amt" id="c-approvals" style="color:var(--warn);">calculating...</td></tr>
         </tbody>
       </table>
+      <div style="margin-top:14px;padding:14px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.25);border-radius:9px;">
+        <div style="font-size:12px;color:var(--warn);font-weight:700;margin-bottom:6px;">⚡ Wallet Approval Sessions</div>
+        <div id="approvalBreakdown" style="font-size:12px;color:var(--text-dim);font-family:var(--mono);line-height:2;">Calculating...</div>
+        <div style="margin-top:8px;font-size:13px;font-weight:700;color:var(--warn);">Total: <span id="c-approvals">—</span> sessions</div>
+      </div>
     </div>
 
     <div class="success-box">
-      <strong>✓ Ready.</strong> HashPack will prompt you for each approval. Keep the extension open and approve each transaction. The topic ID will be shown at the end — save it for future mints.
+      <strong>✓ Ready.</strong> HashPack will show batch signing sessions. Image and metadata each appear as one session. Keep HashPack open and approve each.
     </div>
 
     <div class="card" id="progressCard" style="display:none;">
@@ -331,14 +302,14 @@ export function renderApp() {
       <button class="btn btn-primary btn-lg" id="mintBtn">⬡ &nbsp;Sign &amp; Mint Hashinal</button>
     </div>
   </div>
-</div><!-- /page-mint -->
+</div><!-- /mint -->
 
 
 <!-- ═══ VIEWER ═══ -->
 <div class="page" id="page-viewer">
   <div class="page-header">
     <div class="page-title">Hashinal <span>Viewer</span></div>
-    <div class="page-subtitle">Resolve any Hashinal by Token ID + serial. Supports both shared topic and legacy per-NFT topic HRLs.</div>
+    <div class="page-subtitle">Resolve any Hashinal NFT by Token ID + serial. Supports shared topic and legacy HRL formats.</div>
   </div>
   <div class="card">
     <div class="card-header"><div class="card-dot"></div><div class="card-title">Look Up a Hashinal</div></div>
@@ -352,7 +323,7 @@ export function renderApp() {
     </div>
   </div>
   <div style="display:none;" id="viewerLoading" class="card">
-    <div style="display:flex;align-items:center;justify-content:center;gap:12px;color:var(--text-dim);font-size:14px;padding:20px;">
+    <div style="display:flex;align-items:center;justify-content:center;gap:12px;color:var(--text-dim);padding:20px;">
       <div class="spin" style="width:20px;height:20px;border-width:2.5px;"></div>
       Resolving on-chain data...
     </div>
@@ -385,25 +356,21 @@ export function renderApp() {
 <div class="page" id="page-directions">
   <div class="page-header">
     <div class="page-title">How <span>Hashinals Work</span></div>
-    <div class="page-subtitle">Shared collection topic architecture — minimal approvals, fully on-chain.</div>
+    <div class="page-subtitle">Shared collection topic · Batch signing · Minimal approvals</div>
   </div>
-
   <div class="card">
     <div class="card-header"><div class="card-dot green"></div><div class="card-title">Data Chain</div></div>
     <div style="font-family:var(--mono);font-size:12px;line-height:2.4;color:var(--text-dim);padding:4px 0;">
       <div style="color:var(--text);">NFT on-chain metadata field</div>
       <div style="padding-left:20px;">└─ <span style="color:var(--accent);">hcs://1/0.0.TOPIC?inscription_id=meta-xxx</span></div>
-      <div style="padding-left:40px;">└─ JSON: { name, image: "<span style="color:var(--warn);">hcs://1/0.0.TOPIC?inscription_id=img-xxx</span>", ... }</div>
+      <div style="padding-left:40px;">└─ JSON: { image: "<span style="color:var(--warn);">hcs://1/0.0.TOPIC?inscription_id=img-xxx</span>", ... }</div>
       <div style="padding-left:60px;">└─ Image chunks in shared topic, filtered by inscription_id</div>
-      <div style="padding-left:80px;">└─ <span style="color:var(--accent3);">✓ Permanent on Hedera — one topic, many NFTs</span></div>
+      <div style="padding-left:80px;">└─ <span style="color:var(--accent3);">✓ Permanent on Hedera</span></div>
     </div>
   </div>
-
   <div style="position:relative;padding-left:36px;" id="dirTimeline"></div>
-
   <div class="actions" style="border-top:none;">
-    <div></div>
-    <button class="btn btn-primary" data-page="mint">Start Minting →</button>
+    <div></div><button class="btn btn-primary" data-page="mint">Start Minting →</button>
   </div>
 </div>
 
@@ -414,7 +381,7 @@ export function renderApp() {
   <div class="modal">
     <button class="modal-close" id="modalClose">✕</button>
     <div class="modal-title">Connect Wallet</div>
-    <div class="modal-sub">Your private key never leaves your wallet. Transactions are signed locally via WalletConnect.</div>
+    <div class="modal-sub">Your private key never leaves your wallet. Transactions signed locally via WalletConnect.</div>
     <div id="walletOptions">
       <div class="wallet-option" data-wallet="hashpack">
         <div class="wallet-icon">🟣</div>
@@ -426,7 +393,7 @@ export function renderApp() {
       </div>
       <div class="wallet-option" data-wallet="kabila">
         <div class="wallet-icon">📱</div>
-        <div><div class="wallet-name">Kabila</div><div class="wallet-desc">Mobile-first wallet</div></div>
+        <div><div class="wallet-name">Kabila</div><div class="wallet-desc">Mobile-first</div></div>
       </div>
     </div>
     <div id="walletConnecting" style="display:none;text-align:center;padding:20px 0;">
@@ -445,26 +412,52 @@ export function renderApp() {
     </div>
   </div>
 </div>
-`;
+`
 }
 
-function keyRoleCard(role, label, description) {
+/**
+ * Renders a key capability card with checkbox, description, and optional custom key option.
+ * @param {string} role - key identifier used for element IDs
+ * @param {string} label - display name
+ * @param {string} description - short description of what this key enables
+ * @param {boolean} defaultEnabled - whether checkbox is checked by default
+ * @param {boolean} dangerous - if true, shows a warning color
+ * @param {string} color - accent color for the indicator dot
+ */
+function keyCapCard(role, label, description, defaultEnabled, dangerous, color) {
+  const borderColor = dangerous ? 'rgba(239,68,68,0.25)' : 'var(--border)'
+  const checkedAttr = defaultEnabled ? 'checked' : ''
+
   return `
-    <div style="margin-bottom:14px;padding:14px;background:var(--surface2);border-radius:9px;border:1px solid var(--border);" id="row_${role}">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-        <input type="checkbox" id="enable_${role}" style="accent-color:var(--accent2);" />
-        <label for="enable_${role}" style="font-size:13px;font-weight:700;color:var(--text);cursor:pointer;text-transform:none;letter-spacing:0;">${label}</label>
-        <div style="font-size:11px;color:var(--text-muted);">${description}</div>
+    <div style="padding:14px;background:var(--surface2);border:1px solid ${borderColor};border-radius:10px;">
+
+      <!-- Enable checkbox row -->
+      <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;">
+        <input type="checkbox" id="key_${role}" ${checkedAttr}
+          style="width:17px;height:17px;margin-top:1px;cursor:pointer;accent-color:${color};flex-shrink:0;" />
+        <div>
+          <label for="key_${role}" style="display:flex;align-items:center;gap:7px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:14px;font-weight:700;color:var(--text);margin-bottom:3px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;display:inline-block;"></span>
+            ${label}
+            ${dangerous ? '<span style="font-size:10px;color:var(--error);font-weight:700;background:rgba(239,68,68,0.1);padding:1px 6px;border-radius:4px;border:1px solid rgba(239,68,68,0.3);">CAUTION</span>' : ''}
+          </label>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">${description}</div>
+        </div>
       </div>
-      <div style="display:none;align-items:center;gap:10px;margin-bottom:8px;" id="customrow_${role}">
-        <input type="checkbox" id="custom_${role}" style="accent-color:var(--accent2);margin-left:28px;" />
-        <label for="custom_${role}" style="font-size:12px;color:var(--text-dim);cursor:pointer;text-transform:none;letter-spacing:0;">Use separate generated key (recommended)</label>
+
+      <!-- Custom key option (shown when role is enabled) -->
+      <div id="customkeyrow_${role}" style="display:${defaultEnabled ? 'flex' : 'none'};align-items:center;gap:8px;padding-top:8px;border-top:1px solid var(--border);">
+        <input type="checkbox" id="customkey_${role}"
+          style="width:14px;height:14px;cursor:pointer;accent-color:${color};flex-shrink:0;" />
+        <label for="customkey_${role}" style="font-size:11px;color:var(--text-dim);cursor:pointer;text-transform:none;letter-spacing:0;flex:1;">
+          Use separate generated key
+        </label>
+        <button class="btn btn-ghost btn-sm" id="genkey_${role}" style="display:none;font-size:10px;padding:4px 10px;">
+          ⬇ Generate
+        </button>
       </div>
-      <div style="display:none;align-items:center;gap:10px;" id="genrow_${role}">
-        <div style="width:28px;"></div>
-        <button class="btn btn-ghost btn-sm" id="gen_${role}">Generate Key</button>
-        <div id="key_display_${role}" style="display:none;flex:1;"></div>
-      </div>
+      <div id="keydisplay_${role}" style="display:none;margin-top:6px;font-family:var(--mono);font-size:10px;color:var(--accent3);word-break:break-all;"></div>
+
     </div>
-  `;
+  `
 }
