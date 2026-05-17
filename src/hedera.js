@@ -1,5 +1,10 @@
 /**
  * hedera.js — Real Hedera transactions via WalletConnect + standards-sdk
+ *
+ * Key fix: freezeWithSigner() triggers setAutoRenewAccountId() which calls
+ * AccountId.fromString() on a LedgerId object, crashing with "startsWith is
+ * not a function". We bypass this by calling signer.signTransaction() directly,
+ * which internally calls freezeWith(this._getHederaClient()) — the correct path.
  */
 
 import { getSdk, getAccountId, getNetwork } from './wallet.js'
@@ -25,39 +30,80 @@ function chunkBuffer(buf, chunkBytes = 800) {
 }
 
 /**
- * Create a new HCS-1 topic using TopicCreateTransaction.
+ * Get the best available signer from the connected wallet.
+ * Prefers the signer whose accountId matches the connected account.
+ */
+function getSigner() {
+  const sdk = getSdk()
+  if (!sdk) throw new Error('Wallet not connected')
+
+  const accountInfo = sdk.getAccountInfo?.()
+  const accountId = accountInfo?.accountId
+
+  const signers = sdk.dAppConnector?.signers
+  if (!signers?.length) throw new Error('No signers available — reconnect your wallet')
+
+  // Prefer the signer that matches our connected account
+  const signer = accountId
+    ? signers.find(s => s.getAccountId().toString() === accountId) ?? signers[0]
+    : signers[0]
+
+  if (!signer) throw new Error('No matching signer found')
+  return signer
+}
+
+/**
+ * Execute a transaction using the signer directly.
+ * Uses signer.signTransaction() which handles freezeWith(client) internally,
+ * bypassing the buggy freezeWithSigner() → setAutoRenewAccountId() path.
+ */
+async function execTx(tx) {
+  const signer = getSigner()
+
+  // populateTransaction sets the TransactionId (required before signing)
+  await signer.populateTransaction(tx)
+
+  // signTransaction freezes with the signer's internal Hedera client
+  // (which correctly handles node account IDs) then signs
+  const signedTx = await signer.signTransaction(tx)
+
+  // executeWithSigner broadcasts the signed transaction
+  const response = await signedTx.executeWithSigner(signer)
+
+  // getReceiptWithSigner waits for consensus
+  return response.getReceiptWithSigner(signer)
+}
+
+/**
+ * Create a new HCS-1 topic.
  * Returns topicId as a plain string e.g. "0.0.123456"
  */
 async function createTopic(memo) {
-  const sdk = getSdk()
-  if (!sdk) throw new Error('Wallet not connected — call connectWallet() first')
-
   const { TopicCreateTransaction } = await import('@hashgraph/sdk')
 
   const tx = new TopicCreateTransaction()
   if (memo) tx.setTopicMemo(memo)
 
-  const receipt = await sdk.executeTransaction(tx)
+  const receipt = await execTx(tx)
 
   if (!receipt?.topicId) {
-    throw new Error(`createTopic failed — receipt had no topicId. Receipt: ${JSON.stringify(receipt)}`)
+    throw new Error(`createTopic failed — no topicId in receipt: ${JSON.stringify(receipt)}`)
   }
 
   return receipt.topicId.toString()
 }
 
 /**
- * Submit a single text message to an HCS-1 topic.
+ * Submit a single message to an HCS-1 topic.
  */
 async function submitChunk(topicId, message) {
-  const sdk = getSdk()
   const { TopicMessageSubmitTransaction } = await import('@hashgraph/sdk')
 
   const tx = new TopicMessageSubmitTransaction()
     .setTopicId(topicId)
     .setMessage(message)
 
-  return sdk.executeTransaction(tx)
+  return execTx(tx)
 }
 
 /**
@@ -158,7 +204,7 @@ export async function createNFTToken({ name, symbol, maxSupply, supplyType }) {
     .setSupplyType(supplyType === 'INFINITE' ? TokenSupplyType.Infinite : TokenSupplyType.Finite)
     .setTreasuryAccountId(accountId)
 
-  const receipt = await sdk.executeTransaction(tx)
+  const receipt = await execTx(tx)
 
   if (!receipt?.tokenId) {
     throw new Error(`createNFTToken failed — no tokenId in receipt: ${JSON.stringify(receipt)}`)
@@ -185,7 +231,7 @@ export async function mintNFT(tokenId, metadataHRL, count = 1) {
     .setTokenId(tokenId)
     .setMetadata(metadataBuffers)
 
-  const receipt = await sdk.executeTransaction(tx)
+  const receipt = await execTx(tx)
 
   if (!receipt?.serials) {
     throw new Error(`mintNFT failed — no serials in receipt: ${JSON.stringify(receipt)}`)
